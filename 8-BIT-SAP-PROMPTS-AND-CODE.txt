@@ -1,0 +1,696 @@
+Block diagram (control signals)
+
+  See https://youtu.be/FCscQGBIL-Y?t=5m25s
+
+
+
+                                ||            --------
+                                ||   loNib   |        | <- CO
+                                || <-------> |   PC   | <- J
+                                ||           |        | <- CE
+                                ||            --------
+                                ||
+                                ||
+                                ||
+            --------            ||            --------
+     MI -> |        |   loNib   ||           |        | <- AI
+           |  MAR   | <-------- || <-------> |   A    | <- AO
+           |        |           ||           |        |
+            --------            ||            --------
+               |                ||               |
+               | loNib          ||               |
+               v                ||               v
+            --------            ||            --------
+     RI -> |        |           ||           |        | <- ΣO
+     R0 -> |  RAM   | <-------> || <-------> |  ALU   | <- SU
+           |        |           ||           |        | -> FC
+            --------            ||            --------  -> FZ
+                                ||               ^
+                                ||               |
+                                ||               |
+            --------            ||            --------
+     II -> |        | <-------- ||           |        | <- BI
+     IO -> |   IR   |           || --------> |   B    | // <- BO
+           |        | --------> ||           |        |
+            --------    loNib   ||            --------
+               |                ||
+               | hiNib          ||
+               v                ||
+          INSTR DECODER         ||            --------
+                                ||           |        | <- OI
+                                || --------> |  OUT   |
+                                ||           |        |
+            --------            ||            --------
+     FI -> |        |           ||                |
+     FZ -> |   FR   |           ||                |
+     FC -> |        |           ||                v
+            --------            ||             DISPLAY
+                |               ||
+                |               ||
+                v               ||
+              FLAGS             ||
+                                ||
+
+
+Program examples
+
+	OUT = M[15] + M[14] - M[13]
+
+	    assembly
+	            
+	    LDA 15  
+	    ADD 14  
+	    SUB 13  
+	    OUT     
+	    HLT     
+
+	    binary
+	    instr#  immediate
+	    
+	    0001    1111
+	    0010    1110
+	    0011    1101
+	    1110    0000
+	    1111    0000
+
+
+	OUT = multiples of 3
+
+		LDI 3
+		STA 15  // M[15] = 3
+		LDI 0   // A = 0
+		ADD 15  // A += M[15]
+		OUT
+		JMP 3   // loop indefinitely
+
+
+Command description
+
+	8 bit instruction code -> upper four bits correspond to instruction type
+	                       -> lower four bits correspond to immediate/address
+
+
+	NOP       :  do nothing
+	LDA addr  :  A = memory[ addr ]
+	STA addr  :  memory[ addr ] = A
+	LDI immed :  A = immed
+	ADD addr  :  B = memory[ addr ]; A += B
+	SUB addr  :  B = memory[ addr ]; A -= B
+	JMP addr  :  PC = addr
+	JC  addr  :  PC = addr if carry flag set
+	JZ  addr  :  PC = addr if zero flag set
+	...
+	OUT       :  output = contents of A
+	HLT       :  halt
+
+Registers
+	
+	- A
+	- B
+	- instruction
+	- output
+	- memory_address
+	- flags
+		. carry, zero
+
+
+Step
+	https://youtu.be/dHWFpkGsxOs?t=29m
+	
+	Lasts one clock cycle
+
+	(Versus PC which is incremented after fetch... so its interval duration is
+	 variable at clock cycle duration * nSteps in instruction)
+
+CPU control signals
+
+	Who's putting / getting what from data bus ?
+	
+	HLT - halt
+	MI  - memory_address_reg in
+	RI  - memory(RAM) in
+	R0  - memory(RAM) out
+	IO  - instruction_reg out
+	II  - instruction_reg in
+	AI  - A_reg in
+	AO  - A_reg out
+
+	ΣO - ALU out -> A_reg op B_reg out  ??
+	SU - If set, ALU subtracts. Else, ALU adds
+	BI - B_reg in
+	OI - output_reg in  // display
+	CE - program_counter enable -> increment counter
+	CO - program_counter out
+	J  - jump
+	FI - flags_reg in
+
+
+Instructions
+	                         Flags
+	Name     Opcode   Step   ZC     HLT MI RI RO IO II AI AO    ΣO SU BI OI CE CO J  FI
+
+	Fetch    xxxx     000    ..     0   1  0  0  0  0  0  0     0  0  0  0  0  1  0  0
+	         xxxx     001    ..     0   0  0  1  0  1  0  0     0  0  0  0  1  0  0  0
+
+	LDA      0001     010    ..     0   1  0  0  1  0  0  0     0  0  0  0  0  0  0  0
+	         0001     011    ..     0   0  0  1  0  0  1  0     0  0  0  0  0  0  0  0
+	         0001     100    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+
+	ADD      0010     010    ..     0   1  0  0  1  0  0  0     0  0  0  0  0  0  0  0
+	         0010     011    ..     0   0  0  1  0  0  0  0     0  0  1  0  0  0  0  0
+	         0010     100    ..     0   0  0  0  0  0  1  0     1  0  0  0  0  0  0  0
+
+	OUT      1110     010    ..     0   0  0  0  0  0  0  1     0  0  0  1  0  0  0  0
+	         1110     011    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+	         1110     100    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+
+	HLT      1111     010    ..     1   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+	         1111     011    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+	         1111     100    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+
+	Smthn    xxxx     010    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+	         xxxx     011    ..     0   0  0  0  0  0  0  0     0  0  0  0  0  0  0  0
+
+
+Microcode
+
+	Each instruction can have up to 8 steps
+
+	Stored in EEPROM  ( 8bytes x 16 x 4 )
+
+	Address is composite
+		   9 = controlWord (upper 0, lower 1)  // I flipped order from official. This seems more logical
+		8..7 = alu flags ( ZC )                // ditto
+		6..3 = instruction opcode
+		2..0 = microInstruction step
+
+		ex. HLT      -> 00 1111 -> 15
+		    HLT & C  -> 01 1111 -> 31
+		    HLT & Z  -> 10 1111 -> 47
+		    HLT & ZC -> 11 1111 -> 63
+
+
+	Name    Opcode  byte1         byte2         byte3         byte4         byte5         byte6         byte7         byte8
+  
+	NOP     0       CO|MI         RO|II|CE      x             x             x             x             x             x
+	LDA     1       CO|MI         RO|II|CE      IO|MI         RO|AI         0             0             0             0
+	STA     2       CO|MI         RO|II|CE      IO|MI         AO|RI         0             0             0             0
+	LDI     3       CO|MI         RO|II|CE      IO|AI         0             0             0             0             0
+	ADD     4       CO|MI         RO|II|CE      IO|MI         RO|BI         ΣO|AI|FI      0             0             0
+	SUB     5       CO|MI         RO|II|CE      IO|MI         RO|BI         ΣO|AI|SU|FI   0             0             0
+	JMP     6       CO|MI         RO|II|CE      IO|J          0             0             0             0             0
+	*JC     7       CO|MI         RO|II|CE      0             0             0             0             0             0
+	*JZ     8       CO|MI         RO|II|CE      0             0             0             0             0             0
+	xxx     9       CO|MI         RO|II|CE      0             0             0             0             0             0
+	xxx     10      CO|MI         RO|II|CE      0             0             0             0             0             0
+	xxx     11      CO|MI         RO|II|CE      0             0             0             0             0             0
+	**ADI   12      CO|MI         RO|II|CE      IO|BI         ΣO|AI|FI      0             0             0             0
+	**SBI   13      CO|MI         RO|II|CE      IO|BI         ΣO|AI|SU|FI   0             0             0             0
+	OUT     14      CO|MI         RO|II|CE      AO|OI         0             0             0             0             0
+	HLT     15      CO|MI         RO|II|CE      HLT           0             0             0             0             0
+
+
+	* Vary depending on flag status
+
+	  Flags_z0c0 ->  Z = 0, C = 0  correspond to instruction   0..15
+	  Flags_z0c1 ->  Z = 0, C = 1  correspond to instruction  16..31
+	  Flags_z1c0 ->  Z = 1, C = 0  correspond to instruction  32..47
+	  Flags_z1c1 ->  Z = 1, C = 1  correspond to instruction  48..63
+
+	-- Flags_z0c1 --
+	 JC     23    CO|MI         RO|II|CE      IO|J          0             0             0             0             0
+
+	-- Flags_z1c0 --
+	 JZ     40    CO|MI         RO|II|CE      IO|J          0             0             0             0             0
+
+	-- Flags_z1c1 --
+	 JC     55    CO|MI         RO|II|CE      IO|J          0             0             0             0             0
+	 JZ     56    CO|MI         RO|II|CE      IO|J          0             0             0             0             0
+
+
+	** unofficial instructions
+
+	TODO... check final instruction order he uses... whether reorders to logical? Otherwise might not be binary compatible
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---- SAP‑1/SAP‑2 Visualizer with Control Signals & 8‑Bit Bus ----
+
+// Program & Memory
+let asmProgram = [0x00, 0x11, 0x22, 0xE0, 0xF0, 0x05, 0x03, 0x01];
+let memory = new Array(16).fill(0);
+
+// Registers & Flags
+let pc = 0, mar = 0, ir = 0;
+let regA = 0, regB = 0, outReg = 0;
+let flags = { Z: 0, C: 0 };
+
+// Control & Timing
+const CYCLE = 60;
+let stage = 0, hlt = false, lastFrame = 0;
+const SIG_NAMES = [
+  'pc_en','pc_inc','mem_load','mem_en',
+  'ir_load','ir_en','a_load','a_en',
+  'b_load','adder_sub','adder_en','out_en','flags_en','hlt'
+];
+let sig = {};
+
+// Module Positions
+const MOD = {
+  PC:   { x: 550, y:  50 },
+  MAR:  { x: 150, y: 150 },
+  RAM:  { x: 150, y: 250 },
+  IR:   { x: 150, y: 350 },
+  A:    { x: 350, y: 150 },
+  B:    { x: 350, y: 250 },
+  ALU:  { x: 550, y: 250 },
+  OUT:  { x: 550, y: 450 },
+  FR:   { x: 150, y: 550 }
+};
+
+function setup() {
+  createCanvas(900, 700);
+  textFont('monospace', 12);
+  loadProgram();
+}
+
+function draw() {
+  background(30);
+  drawClockStatus();
+  drawControlUnit();
+  updateControlSignals();
+  drawModules();
+  drawBusWires();
+  animateBits();
+
+  if (!hlt && frameCount - lastFrame > CYCLE) {
+    lastFrame = frameCount;
+    executeStage();
+    stage = (stage + 1) % 6;
+  }
+}
+
+// Initialize memory with asmProgram
+function loadProgram() {
+  for (let i = 0; i < asmProgram.length && i < 16; i++) {
+    memory[i] = asmProgram[i];
+  }
+}
+
+// Determine control signals each stage
+function updateControlSignals() {
+  SIG_NAMES.forEach(s => sig[s] = 0);
+  let opc = ir >> 4;
+  if (stage === 0) { sig.pc_en = 1; sig.mem_load = 1; }
+  if (stage === 1) sig.pc_inc = 1;
+  if (stage === 2) { sig.mem_en = 1; sig.ir_load = 1; }
+  if (stage === 3) {
+    if ([0,1,2].includes(opc)) { sig.ir_en = 1; sig.mem_load = 1; }
+    if (opc === 0xF) sig.hlt = 1;
+  }
+  if (stage === 4) {
+    if (opc === 0) { sig.mem_en = 1; sig.a_load = 1; }
+    if ([1,2].includes(opc)) { sig.mem_en = 1; sig.b_load = 1; }
+  }
+  if (stage === 5) {
+    if (opc === 1) { sig.adder_en = 1; sig.a_load = 1; }
+    if (opc === 2) { sig.adder_sub = 1; sig.adder_en = 1; sig.a_load = 1; }
+  }
+}
+
+// Perform data ops at end of each stage
+function executeStage() {
+  if (sig.pc_en) mar = pc;
+  if (sig.pc_inc) pc = (pc + 1) & 0x0F;
+  if (sig.mem_load) mar = sig.ir_en ? (ir & 0x0F) : mar;
+  if (sig.ir_load) ir = memory[mar];
+  if (sig.mem_en && !sig.ir_load) ; // memory read feeds bus
+  if (sig.ir_en) mar = ir & 0x0F;
+  if (sig.a_load) regA = busValue();
+  if (sig.b_load) regB = busValue();
+  if (sig.adder_en) {
+    let res = sig.adder_sub ? regA - regB : regA + regB;
+    flags.C = (res & 0x100) ? 1 : 0;
+    flags.Z = ((res & 0xFF) === 0) ? 1 : 0;
+    regA = res & 0xFF;
+    sig.flags_en = 1;
+  }
+  if (sig.out_en) outReg = busValue();
+  if (sig.hlt) hlt = true;
+}
+
+// Compute value currently on bus
+function busValue() {
+  if (sig.ir_en)    return ir;
+  if (sig.adder_en) return (sig.adder_sub ? regA - regB : regA + regB) & 0xFF;
+  if (sig.a_en)     return regA;
+  if (sig.mem_en)   return memory[mar];
+  if (sig.pc_en)    return pc;
+  return 0;
+}
+
+// Draw clock and HLT status
+function drawClockStatus() {
+  fill(255);
+  textAlign(LEFT);
+  textSize(14);
+  text(`CLK: ${frameCount % 2 ? '↑' : '↓'}`, 20, 30);
+  text(`HLT: ${hlt ? 'YES' : 'NO'}`, 20, 50);
+}
+
+// Draw control signal panel
+function drawControlUnit() {
+  let x0 = 20, y0 = 80;
+  textAlign(LEFT);
+  textSize(12);
+  text('Control Signals:', x0, y0);
+  SIG_NAMES.forEach((name, i) => {
+    let on = sig[name];
+    fill(on ? 'lime' : '#444');
+    rect(x0, y0 + 15 + i * 15, 10, 10);
+    fill(255);
+    text(name, x0 + 15, y0 + 24 + i * 15);
+  });
+}
+
+// Draw each module as box, highlight and arrow data flows
+function drawModules() {
+  Object.entries(MOD).forEach(([name, m]) => {
+    let active = false;
+    switch (name) {
+      case 'PC':   active = sig.pc_en || sig.pc_inc; break;
+      case 'MAR':  active = sig.mem_load; break;
+      case 'RAM':  active = sig.mem_en; break;
+      case 'IR':   active = sig.ir_load || sig.ir_en; break;
+      case 'A':    active = sig.a_load || sig.a_en; break;
+      case 'B':    active = sig.b_load; break;
+      case 'ALU':  active = sig.adder_en; break;
+      case 'OUT':  active = sig.out_en; break;
+      case 'FR':   active = sig.flags_en; break;
+    }
+    fill(active ? 'orange' : '#444');
+    rect(m.x, m.y, 120, 50, 5);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    let val = '00';
+    if (name === 'PC') val = pc;
+    if (name === 'MAR') val = mar;
+    if (name === 'RAM') val = memory[mar];
+    if (name === 'IR') val = ir;
+    if (name === 'A') val = regA;
+    if (name === 'B') val = regB;
+    if (name === 'ALU') val = busValue();
+    if (name === 'FR') val = (flags.C << 1) | flags.Z;
+    if (name === 'OUT') val = outReg;
+    text(`${name}\n0x${nf(val, 2, 2).toUpperCase()}`, m.x + 60, m.y + 25);
+
+    // Arrowed data flows
+    stroke('cyan'); strokeWeight(active ? 2 : 0);
+    if (name === 'PC' && sig.pc_en)      line(m.x, m.y+25, MOD.MAR.x+60, MOD.MAR.y);
+    if (name === 'MAR' && sig.mem_load)  line(m.x+60, m.y, m.x+60, MOD.RAM.y);
+    if (name === 'RAM' && sig.mem_en)    line(m.x+120, m.y+25, MOD.IR.x, MOD.IR.y+25);
+    if (name === 'IR' && sig.ir_en)      line(m.x+120, m.y+25, MOD.MAR.x+60, MOD.MAR.y+25);
+    if (name === 'A' && sig.a_en)        line(m.x+120, m.y+25, MOD.ALU.x, MOD.ALU.y);
+    if (name === 'ALU' && sig.adder_en)  line(MOD.ALU.x, MOD.ALU.y+25, MOD.A.x, MOD.A.y+25);
+    if (name === 'OUT' && sig.out_en)    line(MOD.A.x, MOD.A.y, MOD.OUT.x+60, MOD.OUT.y);
+    noStroke();
+  });
+}
+
+// Draw 8‑bit bus wires
+function drawBusWires() {
+  let y0 = 325, spacing = 12;
+  stroke(100); strokeWeight(1);
+  for (let i = 0; i < 8; i++) {
+    line(300, y0 + i * spacing, 500, y0 + i * spacing);
+  }
+  noStroke(); fill(200);
+  textAlign(LEFT);
+  text('8‑bit Bus →', 300, y0 - 20);
+}
+
+// Animate bits flowing across bus
+let bitX = 300;
+function animateBits() {
+  let v = busValue();
+  if (frameCount % 4 === 0) bitX = 300;
+  if (v !== 0) bitX = min(bitX + 4, 500);
+  let y0 = 325, spacing = 12;
+  for (let b = 0; b < 8; b++) {
+    if ((v >> b) & 1) {
+      fill('cyan'); noStroke();
+      ellipse(bitX, y0 + (7 - b) * spacing, 8);
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---- SAP‑1/SAP‑2 Visualizer with Control Signals & 8‑Bit Bus ----
+
+// Program & Memory
+let asmProgram = [0x00, 0x11, 0x22, 0xE0, 0xF0, 0x05, 0x03, 0x01];
+let memory = new Array(16).fill(0);
+
+// Registers & Flags
+let pc = 0, mar = 0, ir = 0;
+let regA = 0, regB = 0, outReg = 0;
+let flags = { Z: 0, C: 0 };
+
+// Control & Timing
+const CYCLE = 60;
+let stage = 0, hlt = false, lastFrame = 0;
+const SIG_NAMES = [
+  'pc_en','pc_inc','mem_load','mem_en',
+  'ir_load','ir_en','a_load','a_en',
+  'b_load','adder_sub','adder_en','out_en','flags_en','hlt'
+];
+let sig = {};
+
+// Module Positions
+const MOD = {
+  PC:   { x: 550, y:  50 },
+  MAR:  { x: 150, y: 150 },
+  RAM:  { x: 150, y: 250 },
+  IR:   { x: 150, y: 350 },
+  A:    { x: 350, y: 150 },
+  B:    { x: 350, y: 250 },
+  ALU:  { x: 550, y: 250 },
+  OUT:  { x: 550, y: 450 },
+  FR:   { x: 150, y: 550 }
+};
+
+function setup() {
+  createCanvas(900, 700);
+  textFont('monospace', 12);
+  loadProgram();
+}
+
+function draw() {
+  background(30);
+  drawClockStatus();
+  drawControlUnit();
+  updateControlSignals();
+  drawModules();
+  drawBusWires();
+  animateBits();
+
+  if (!hlt && frameCount - lastFrame > CYCLE) {
+    lastFrame = frameCount;
+    executeStage();
+    stage = (stage + 1) % 6;
+  }
+}
+
+// Initialize memory with asmProgram
+function loadProgram() {
+  for (let i = 0; i < asmProgram.length && i < 16; i++) {
+    memory[i] = asmProgram[i];
+  }
+}
+
+// Determine control signals each stage
+function updateControlSignals() {
+  SIG_NAMES.forEach(s => sig[s] = 0);
+  let opc = ir >> 4;
+  if (stage === 0) { sig.pc_en = 1; sig.mem_load = 1; }
+  if (stage === 1) sig.pc_inc = 1;
+  if (stage === 2) { sig.mem_en = 1; sig.ir_load = 1; }
+  if (stage === 3) {
+    if ([0,1,2].includes(opc)) { sig.ir_en = 1; sig.mem_load = 1; }
+    if (opc === 0xF) sig.hlt = 1;
+  }
+  if (stage === 4) {
+    if (opc === 0) { sig.mem_en = 1; sig.a_load = 1; }
+    if ([1,2].includes(opc)) { sig.mem_en = 1; sig.b_load = 1; }
+  }
+  if (stage === 5) {
+    if (opc === 1) { sig.adder_en = 1; sig.a_load = 1; }
+    if (opc === 2) { sig.adder_sub = 1; sig.adder_en = 1; sig.a_load = 1; }
+  }
+}
+
+// Perform data ops at end of each stage
+function executeStage() {
+  if (sig.pc_en) mar = pc;
+  if (sig.pc_inc) pc = (pc + 1) & 0x0F;
+  if (sig.mem_load) mar = sig.ir_en ? (ir & 0x0F) : mar;
+  if (sig.ir_load) ir = memory[mar];
+  if (sig.mem_en && !sig.ir_load) ; // memory read feeds bus
+  if (sig.ir_en) mar = ir & 0x0F;
+  if (sig.a_load) regA = busValue();
+  if (sig.b_load) regB = busValue();
+  if (sig.adder_en) {
+    let res = sig.adder_sub ? regA - regB : regA + regB;
+    flags.C = (res & 0x100) ? 1 : 0;
+    flags.Z = ((res & 0xFF) === 0) ? 1 : 0;
+    regA = res & 0xFF;
+    sig.flags_en = 1;
+  }
+  if (sig.out_en) outReg = busValue();
+  if (sig.hlt) hlt = true;
+}
+
+// Compute value currently on bus
+function busValue() {
+  if (sig.ir_en)    return ir;
+  if (sig.adder_en) return (sig.adder_sub ? regA - regB : regA + regB) & 0xFF;
+  if (sig.a_en)     return regA;
+  if (sig.mem_en)   return memory[mar];
+  if (sig.pc_en)    return pc;
+  return 0;
+}
+
+// Draw clock and HLT status
+function drawClockStatus() {
+  fill(255);
+  textAlign(LEFT);
+  textSize(14);
+  text(`CLK: ${frameCount % 2 ? '↑' : '↓'}`, 20, 30);
+  text(`HLT: ${hlt ? 'YES' : 'NO'}`, 20, 50);
+}
+
+// Draw control signal panel
+function drawControlUnit() {
+  let x0 = 20, y0 = 80;
+  textAlign(LEFT);
+  textSize(12);
+  text('Control Signals:', x0, y0);
+  SIG_NAMES.forEach((name, i) => {
+    let on = sig[name];
+    fill(on ? 'lime' : '#444');
+    rect(x0, y0 + 15 + i * 15, 10, 10);
+    fill(255);
+    text(name, x0 + 15, y0 + 24 + i * 15);
+  });
+}
+
+// Draw each module as box, highlight and arrow data flows
+function drawModules() {
+  Object.entries(MOD).forEach(([name, m]) => {
+    let active = false;
+    switch (name) {
+      case 'PC':   active = sig.pc_en || sig.pc_inc; break;
+      case 'MAR':  active = sig.mem_load; break;
+      case 'RAM':  active = sig.mem_en; break;
+      case 'IR':   active = sig.ir_load || sig.ir_en; break;
+      case 'A':    active = sig.a_load || sig.a_en; break;
+      case 'B':    active = sig.b_load; break;
+      case 'ALU':  active = sig.adder_en; break;
+      case 'OUT':  active = sig.out_en; break;
+      case 'FR':   active = sig.flags_en; break;
+    }
+    fill(active ? 'orange' : '#444');
+    rect(m.x, m.y, 120, 50, 5);
+    fill(255);
+    textAlign(CENTER, CENTER);
+    let val = '00';
+    if (name === 'PC') val = pc;
+    if (name === 'MAR') val = mar;
+    if (name === 'RAM') val = memory[mar];
+    if (name === 'IR') val = ir;
+    if (name === 'A') val = regA;
+    if (name === 'B') val = regB;
+    if (name === 'ALU') val = busValue();
+    if (name === 'FR') val = (flags.C << 1) | flags.Z;
+    if (name === 'OUT') val = outReg;
+    text(`${name}\n0x${nf(val, 2, 2).toUpperCase()}`, m.x + 60, m.y + 25);
+
+    // Arrowed data flows
+    stroke('cyan'); strokeWeight(active ? 2 : 0);
+    if (name === 'PC' && sig.pc_en)      line(m.x, m.y+25, MOD.MAR.x+60, MOD.MAR.y);
+    if (name === 'MAR' && sig.mem_load)  line(m.x+60, m.y, m.x+60, MOD.RAM.y);
+    if (name === 'RAM' && sig.mem_en)    line(m.x+120, m.y+25, MOD.IR.x, MOD.IR.y+25);
+    if (name === 'IR' && sig.ir_en)      line(m.x+120, m.y+25, MOD.MAR.x+60, MOD.MAR.y+25);
+    if (name === 'A' && sig.a_en)        line(m.x+120, m.y+25, MOD.ALU.x, MOD.ALU.y);
+    if (name === 'ALU' && sig.adder_en)  line(MOD.ALU.x, MOD.ALU.y+25, MOD.A.x, MOD.A.y+25);
+    if (name === 'OUT' && sig.out_en)    line(MOD.A.x, MOD.A.y, MOD.OUT.x+60, MOD.OUT.y);
+    noStroke();
+  });
+}
+
+// Draw 8‑bit bus wires
+function drawBusWires() {
+  let y0 = 325, spacing = 12;
+  stroke(100); strokeWeight(1);
+  for (let i = 0; i < 8; i++) {
+    line(300, y0 + i * spacing, 500, y0 + i * spacing);
+  }
+  noStroke(); fill(200);
+  textAlign(LEFT);
+  text('8‑bit Bus →', 300, y0 - 20);
+}
+
+// Animate bits flowing across bus
+let bitX = 300;
+function animateBits() {
+  let v = busValue();
+  if (frameCount % 4 === 0) bitX = 300;
+  if (v !== 0) bitX = min(bitX + 4, 500);
+  let y0 = 325, spacing = 12;
+  for (let b = 0; b < 8; b++) {
+    if ((v >> b) & 1) {
+      fill('cyan'); noStroke();
+      ellipse(bitX, y0 + (7 - b) * spacing, 8);
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,225 @@
+// ---- SAP‑1/SAP‑2 Visualizer with Control Signals & 8‑Bit Bus (Rewritten) ----
+
+// ----- Program & Memory -----
+const asmProgram = [0x00, 0x11, 0x22, 0xE0, 0xF0, 0x05, 0x03, 0x01];
+let memory = Array(16).fill(0);
+
+// ----- Registers & Flags -----
+let pc = 0, mar = 0, ir = 0;
+let regA = 0, regB = 0, outReg = 0;
+let flags = { Z: 0, C: 0 };
+
+// ----- Control & Timing -----
+const CYCLE = 60;
+let stage = 0, hlt = false, lastFrame = 0;
+const SIGNALS = [
+  'pc_en','pc_inc','mem_load','mem_en',
+  'ir_load','ir_en','a_load','a_en',
+  'b_load','alu_sub','alu_en','out_en','flags_en','hlt'
+];
+let sig = {};
+
+// ----- Module Coordinates -----
+const MOD = {
+  PC:  { x: 600, y:  50 },
+  MAR: { x: 200, y: 150 },
+  RAM: { x: 200, y: 260 },
+  IR:  { x: 200, y: 370 },
+  A:   { x: 400, y: 150 },
+  B:   { x: 400, y: 260 },
+  ALU: { x: 600, y: 260 },
+  OUT: { x: 600, y: 450 },
+  FR:  { x: 200, y: 550 }
+};
+
+function setup() {
+  createCanvas(1000, 700);
+  textFont('monospace', 12);
+  loadProgram();
+}
+
+function draw() {
+  background(30);
+  drawClockStatus();
+  drawControlPanel();
+  updateSignals();
+  drawDatapath();
+  drawBusLines();
+  animateBusData();
+
+  if (!hlt && frameCount - lastFrame > CYCLE) {
+    lastFrame = frameCount;
+    executeStage();
+    stage = (stage + 1) % 6;
+  }
+}
+
+// ----- Initialize Memory -----
+function loadProgram() {
+  for (let i = 0; i < asmProgram.length; i++) {
+    memory[i] = asmProgram[i];
+  }
+}
+
+// ----- Control Signal Logic -----
+function updateSignals() {
+  SIGNALS.forEach(s => sig[s] = 0);
+  let opc = ir >> 4;
+  if (stage === 0) { sig.pc_en = 1; sig.mem_load = 1; }
+  if (stage === 1) sig.pc_inc = 1;
+  if (stage === 2) { sig.mem_en = 1; sig.ir_load = 1; }
+  if (stage === 3) {
+    if ([0,1,2].includes(opc)) { sig.ir_en = 1; sig.mem_load = 1; }
+    if (opc === 0xF) sig.hlt = 1;
+  }
+  if (stage === 4) {
+    if (opc === 0) { sig.mem_en = 1; sig.a_load = 1; }
+    if ([1,2].includes(opc)) { sig.mem_en = 1; sig.b_load = 1; }
+  }
+  if (stage === 5) {
+    if (opc === 1) { sig.alu_en = 1; sig.a_load = 1; }
+    if (opc === 2) { sig.alu_sub = 1; sig.alu_en = 1; sig.a_load = 1; }
+  }
+}
+
+// ----- Execute Signal Actions -----
+function executeStage() {
+  if (sig.pc_en) mar = pc;
+  if (sig.pc_inc) pc = (pc + 1) & 0x0F;
+  if (sig.mem_load) mar = sig.ir_en ? (ir & 0x0F) : mar;
+  if (sig.ir_load) ir = memory[mar];
+  if (sig.ir_en) mar = ir & 0x0F;
+  if (sig.a_load) regA = getBusValue();
+  if (sig.b_load) regB = getBusValue();
+  if (sig.alu_en) {
+    let res = sig.alu_sub ? regA - regB : regA + regB;
+    flags.C = (res & 0x100) ? 1 : 0;
+    flags.Z = ((res & 0xFF) === 0) ? 1 : 0;
+    regA = res & 0xFF;
+    sig.flags_en = 1;
+  }
+  if (sig.out_en) outReg = getBusValue();
+  if (sig.hlt) hlt = true;
+}
+
+// ----- Bus Value Mux -----
+function getBusValue() {
+  if (sig.ir_en)    return ir;
+  if (sig.alu_en)   return (sig.alu_sub ? regA - regB : regA + regB) & 0xFF;
+  if (sig.a_en)     return regA;
+  if (sig.mem_en)   return memory[mar];
+  if (sig.pc_en)    return pc;
+  return 0;
+}
+
+// ----- Draw Clock & HLT Indicator -----
+function drawClockStatus() {
+  fill(255);
+  textSize(14);
+  textAlign(LEFT);
+  text(`CLK: ${frameCount % 2 ? '↑' : '↓'}`, 20, 30);
+  text(`HLT: ${hlt ? 'YES' : 'NO'}`, 20, 50);
+}
+
+// ----- Control Signal Panel -----
+function drawControlPanel() {
+  const x0 = 20, y0 = 80;
+  textSize(12);
+  textAlign(LEFT);
+  text('Control Signals:', x0, y0);
+  SIGNALS.forEach((name, i) => {
+    const on = sig[name];
+    fill(on ? 'lime' : '#444');
+    rect(x0, y0 + 15 + 16*i, 12, 12);
+    fill(255);
+    text(name, x0 + 18, y0 + 26 + 16*i);
+  });
+}
+
+// ----- Draw Modules & Data Arrows -----
+function drawDatapath() {
+  Object.entries(MOD).forEach(([name, { x, y }]) => {
+    // Determine active
+    let active = (
+      (name==='PC' && (sig.pc_en||sig.pc_inc)) ||
+      (name==='MAR' && sig.mem_load) ||
+      (name==='RAM' && sig.mem_en) ||
+      (name==='IR' && (sig.ir_load||sig.ir_en)) ||
+      (name==='A'  && (sig.a_load||sig.a_en)) ||
+      (name==='B'  && sig.b_load) ||
+      (name==='ALU'&& sig.alu_en) ||
+      (name==='OUT'&& sig.out_en) ||
+      (name==='FR' && sig.flags_en)
+    );
+
+    // Box
+    fill(active ? 'orange' : '#444');
+    rect(x, y, 120, 50, 5);
+    fill(255);
+    textAlign(CENTER, CENTER);
+
+    // Value
+    let val = '00';
+    switch(name) {
+      case 'PC':  val = pc; break;
+      case 'MAR': val = mar; break;
+      case 'RAM': val = memory[mar]; break;
+      case 'IR':  val = ir; break;
+      case 'A':   val = regA; break;
+      case 'B':   val = regB; break;
+      case 'ALU': val = getBusValue(); break;
+      case 'FR':  val = (flags.C<<1)|flags.Z; break;
+      case 'OUT': val = outReg; break;
+    }
+    text(`${name}\n0x${nf(val,2,2).toUpperCase()}`, x+60, y+25);
+
+    // Data Arrows
+    stroke('cyan'); strokeWeight(active ? 2 : 0);
+    if (name==='PC'   && sig.pc_en) drawArrow(x+120, y+25, MOD.MAR.x, MOD.MAR.y+25);
+    if (name==='MAR'  && sig.mem_load) drawArrow(x+60, y+50, MOD.RAM.x+60, MOD.RAM.y);
+    if (name==='RAM'  && sig.mem_en) drawArrow(x+120, y+25, MOD.IR.x, MOD.IR.y+25);
+    if (name==='IR'   && sig.ir_en) drawArrow(x+120, y+25, MOD.MAR.x+60, MOD.MAR.y+25);
+    if (name==='A'    && sig.a_en) drawArrow(x+120, y+25, MOD.ALU.x, MOD.ALU.y+25);
+    if (name==='ALU'  && sig.alu_en) drawArrow(MOD.ALU.x, MOD.ALU.y+25, MOD.A.x, MOD.A.y+25);
+    if (name==='OUT'  && sig.out_en) drawArrow(MOD.A.x+60, MOD.A.y+50, MOD.OUT.x+60, MOD.OUT.y);
+    noStroke();
+  });
+}
+
+// ----- Draw 8‑Bit Bus Wires -----
+function drawBusLines() {
+  stroke(100); strokeWeight(1);
+  const y0 = 325, sp = 14;
+  for (let i=0; i<8; i++) {
+    line(300, y0 + i*sp, 700, y0 + i*sp);
+  }
+  noStroke(); fill(200);
+  textAlign(LEFT);
+  text('8‑bit Bus →', 300, y0 - 20);
+}
+
+// ----- Animate Bus Data -----
+let bitPos = 300;
+function animateBusData() {
+  const v = getBusValue();
+  if (frameCount % 4 === 0) bitPos = 300;
+  bitPos = min(bitPos + 4, 700);
+  const y0 = 325, sp = 14;
+  for (let b=0; b<8; b++) {
+    if ((v >> b) & 1) {
+      fill('cyan'); noStroke();
+      ellipse(bitPos, y0 + (7-b)*sp, 10);
+    }
+  }
+}
+
+// ----- Utility: Draw Arrow -----
+function drawArrow(x1, y1, x2, y2) {
+  push(); stroke('cyan'); strokeWeight(2);
+  line(x1, y1, x2, y2);
+  const angle = atan2(y2-y1, x2-x1);
+  translate(x2, y2);
+  rotate(angle);
+  triangle(0,0, -8,4, -8,-4);
+  pop();
+}
